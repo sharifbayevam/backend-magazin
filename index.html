@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <title>DUKON CRM - Professional</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body class="bg-gray-100 font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function App() {
+            const [products, setProducts] = useState([]);
+            const [sales, setSales] = useState([]);
+            const [page, setPage] = useState('pos');
+            const [cart, setCart] = useState([]);
+            const [formData, setFormData] = useState({ name: '', stock: '', price: '', barcode: '' });
+            // Tahrirlash uchun holatlar
+            const [editingProduct, setEditingProduct] = useState(null);
+
+            const loadData = () => {
+                fetch('http://localhost:5000/api/products').then(res => res.json()).then(setProducts);
+                fetch('http://localhost:5000/api/sales').then(res => res.json()).then(setSales);
+            };
+
+            useEffect(() => { loadData() }, []);
+
+            const formatMoney = (v) => Number(v || 0).toLocaleString();
+
+            const deleteProduct = (id) => {
+                if (confirm("O'chirilsinmi?")) {
+                    fetch(`http://localhost:5000/api/products/${id}`, { method: 'DELETE' }).then(loadData);
+                }
+            };
+
+            const handleUpdate = (e) => {
+                e.preventDefault();
+                fetch(`http://localhost:5000/api/products/${editingProduct.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(editingProduct)
+                }).then(() => {
+                    setEditingProduct(null);
+                    loadData();
+                    alert("Yangilandi!");
+                });
+            };
+
+            const addToCart = (p) => {
+                if (p.stock <= 0) return alert("Omborda qolmagan!");
+                const exist = cart.find(x => x.id === p.id);
+                if (exist) {
+                    setCart(cart.map(x => x.id === p.id ? { ...exist, qty: exist.qty + 1 } : x));
+                } else {
+                    setCart([...cart, { ...p, qty: 1 }]);
+                }
+            };
+
+            const handleCheckout = () => {
+                fetch('http://localhost:5000/api/sell-batch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ items: cart.map(i => ({ id: i.id, qty: i.qty, price: i.price })) })
+                }).then(() => { setCart([]); loadData(); alert("Sotuv bajarildi!"); });
+            };
+
+            return (
+                <div className="flex h-screen w-full fixed overflow-hidden">
+                    {/* Sidebar */}
+                    <div className="w-64 bg-slate-900 text-white p-6 flex flex-col shadow-2xl">
+                        <div className="text-2xl font-black mb-10 text-blue-400 italic">DUKON.ERP</div>
+                        <nav className="flex-1 space-y-3 font-bold">
+                            <button onClick={() => setPage('pos')} className={`w-full p-4 rounded-2xl text-left ${page === 'pos' ? 'bg-blue-600' : 'hover:bg-slate-800'}`}>💰 Kassa</button>
+                            <button onClick={() => setPage('inv')} className={`w-full p-4 rounded-2xl text-left ${page === 'inv' ? 'bg-blue-600' : 'hover:bg-slate-800'}`}>📦 Ombor</button>
+                            <button onClick={() => setPage('reports')} className={`w-full p-4 rounded-2xl text-left ${page === 'reports' ? 'bg-blue-600' : 'hover:bg-slate-800'}`}>📊 Analitika</button>
+                            <button onClick={() => setPage('add')} className="w-full p-4 bg-emerald-600 rounded-2xl text-left hover:bg-emerald-700">➕ Yangi Tovar</button>
+                        </nav>
+                    </div>
+
+                    {/* Main */}
+                    <div className="flex-1 p-8 overflow-y-auto bg-slate-50">
+                        {/* TAHRIRLASH MODALI */}
+                        {editingProduct && (
+                            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                                <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-md">
+                                    <h2 className="text-xl font-black mb-6 uppercase">Tahrirlash</h2>
+                                    <form onSubmit={handleUpdate} className="space-y-4">
+                                        <input type="text" className="w-full p-4 bg-gray-50 rounded-2xl border outline-none" value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} />
+                                        <input type="number" className="w-full p-4 bg-gray-50 rounded-2xl border outline-none" value={editingProduct.price} onChange={e => setEditingProduct({...editingProduct, price: e.target.value})} />
+                                        <input type="number" className="w-full p-4 bg-gray-50 rounded-2xl border outline-none" value={editingProduct.stock} onChange={e => setEditingProduct({...editingProduct, stock: e.target.value})} />
+                                        <div className="flex gap-2">
+                                            <button type="submit" className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-bold">SAQLASH</button>
+                                            <button onClick={() => setEditingProduct(null)} className="flex-1 bg-gray-200 py-4 rounded-2xl font-bold">BEKOR QILISH</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        )}
+
+                        {page === 'inv' && (
+                            <div className="bg-white rounded-3xl shadow-xl overflow-hidden border">
+                                <table className="w-full text-left">
+                                    <thead className="bg-slate-50 text-slate-400 text-xs font-bold uppercase border-b">
+                                        <tr><th className="p-6">Mahsulot</th><th className="p-6 text-center">Zaxira</th><th className="p-6 text-right">Narxi</th><th className="p-6 text-center">Amallar</th></tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {products.map(p => (
+                                            <tr key={p.id} className="hover:bg-slate-50 transition font-medium">
+                                                <td className="p-6">{p.name}</td>
+                                                <td className="p-6 text-center text-blue-600">{p.stock} ta</td>
+                                                <td className="p-6 text-right font-black">{formatMoney(p.price)}</td>
+                                                <td className="p-6 text-center flex gap-2 justify-center">
+                                                    <button onClick={() => setEditingProduct(p)} className="p-2 px-4 bg-amber-50 text-amber-600 rounded-xl font-bold hover:bg-amber-500 hover:text-white transition">✏️ Tahrir</button>
+                                                    <button onClick={() => deleteProduct(p.id)} className="p-2 px-4 bg-red-50 text-red-500 rounded-xl font-bold hover:bg-red-500 hover:text-white transition">🗑️ O'chirish</button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {page === 'reports' && (
+                            <div className="space-y-6">
+                                <div className="flex justify-between items-center">
+                                    <h2 className="text-3xl font-black text-slate-800">📊 HISOBOTLAR</h2>
+                                    <button className="bg-sky-500 text-white px-6 py-3 rounded-2xl font-bold shadow-lg hover:bg-sky-600 transition flex items-center gap-2">
+                                        ✈️ Telegramga yuborish
+                                    </button>
+                                </div>
+                                <div className="grid grid-cols-2 gap-6">
+                                    <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
+                                        <p className="text-slate-400 font-bold text-xs uppercase mb-1">Bugungi Tushum</p>
+                                        <p className="text-4xl font-black text-slate-900">{formatMoney(sales.reduce((a, b) => a + (b.total_price || 0), 0))}</p>
+                                    </div>
+                                    <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
+                                        <p className="text-slate-400 font-bold text-xs uppercase mb-1">Sotuvlar Soni</p>
+                                        <p className="text-4xl font-black text-blue-600">{sales.length} <small className="text-sm font-normal text-slate-400 italic">cheklar</small></p>
+                                    </div>
+                                </div>
+                                <div className="bg-white rounded-3xl shadow-xl overflow-hidden border">
+                                    <table className="w-full text-left">
+                                        <thead className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase border-b tracking-widest">
+                                            <tr><th className="p-6">Mahsulot</th><th className="p-6 text-center">Miqdori</th><th className="p-6 text-center">Sana</th><th className="p-6 text-right">Summa</th></tr>
+                                        </thead>
+                                        <tbody className="divide-y">
+                                            {sales.length === 0 && <tr><td colSpan="4" className="p-10 text-center text-slate-400">Sotuvlar tarixi mavjud emas</td></tr>}
+                                            {sales.map(s => (
+                                                <tr key={s.id} className="hover:bg-slate-50 transition">
+                                                    <td className="p-6 font-bold">{s.name}</td>
+                                                    <td className="p-6 text-center font-medium">{s.qty} ta</td>
+                                                    <td className="p-6 text-center text-slate-400 text-xs">{s.date}</td>
+                                                    <td className="p-6 text-right font-black text-emerald-600">{formatMoney(s.total_price)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Boshqa sahifalar (pos, add, reports) avvalgi kod bilan bir xil */}
+                        {page === 'pos' && (
+                             <div className="flex gap-8 h-50">
+
+                                <table className="w-full text-left">
+                                        <thead className="bg-slate-50 text-slate-400 text-[10px] font-black uppercase border-b tracking-widest">
+                                            <tr><th className="p-2">Mahsulot</th>
+                                                <th className="p-6 text-center">Miqdori</th>
+                                                <th className="p-2 text-right">Summa</th></tr>
+                                        </thead>
+                                        <tbody className="divide-y">
+                                           
+                                            {products.map(s => (
+                                                <tr key={s.id} onClick={() => addToCart(s)} className="transition hover:border-blue-500 active:scale-95 border-2 m-2 rounded-3xl shadow-sm" >
+                                                    <td className="p-2 font-bold">{s.name}</td>
+                                                    <td className="p-2 text-center font-medium">{s.stock} ta</td>
+                                                    <td className="p-2 text-right font-black text-emerald-600">{formatMoney(s.price)} SO'M</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+
+
+                               
+                                <div className=" savat bg-white rounded-3xl shadow-2xl border flex flex-col overflow-hidden">
+                                    <div className="p-6 border-b bg-gray-50 font-black">SAVATCHA</div>
+                                    <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                                        {cart.map(i => (
+                                            <div key={i.id} className="flex justify-between items-center bg-gray-100 p-4 rounded-2xl border">
+                                                  <div>
+                                                    <div className="font-bold text-sm">{i.name}</div>
+                                                    <div className="text-xs text-gray-400">{i.qty} x {formatMoney(i.price)}</div>
+                                                 </div>
+                                                <div className="font-black text-blue-600">{formatMoney(i.price * i.qty)}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="p-6 bg-slate-900 text-white rounded-t-3xl">
+                                        <div className="text-2xl font-black mb-6 text-center">{formatMoney(cart.reduce((a, c) => a + c.price * c.qty, 0))} so'm</div>
+                                        <button onClick={handleCheckout} className="w-full bg-blue-500 py-5 rounded-2xl font-black shadow-lg hover:bg-blue-600">TO'LOVNI YAKUNLASH</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        
+                     {page === 'add' && (
+                            <div className="max-w-md mx-auto bg-white p-10 rounded-3xl shadow-xl border">
+                                <h2 className="text-2xl font-black text-slate-800 mb-8 uppercase text-center text-blue-600 italic">Yangi Tovar</h2>
+                                <div className="space-y-4">
+                                    <input type="text" placeholder="Shtrix-kod" className="w-full p-4 bg-yellow-50 border-2 border-yellow-200 rounded-2xl outline-none" value={formData.barcode} onChange={e=>setFormData({...formData, barcode:e.target.value})} />
+                                    <input type="text" placeholder="Nomi" className="w-full p-4 bg-slate-50 rounded-2xl outline-none" value={formData.name} onChange={e=>setFormData({...formData, name:e.target.value})} />
+                                    <input type="number" placeholder="Narxi" className="w-full p-4 bg-slate-50 rounded-2xl outline-none" value={formData.price} onChange={e=>setFormData({...formData, price:e.target.value})} />
+                                    <input type="number" placeholder="Soni" className="w-full p-4 bg-slate-50 rounded-2xl outline-none" value={formData.stock} onChange={e=>setFormData({...formData, stock:e.target.value})} />
+                                    <button onClick={()=>{
+                                        fetch('http://localhost:5000/api/add-product',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(formData)})
+                                        .then(()=>{setFormData({name:'',price:'',stock:'',barcode:''}); loadData(); alert("Qo'shildi!");});
+                                    }} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold shadow-xl">SAQLASH</button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
