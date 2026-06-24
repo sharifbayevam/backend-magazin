@@ -195,8 +195,8 @@ app.get('/api/analytics', (req, res) => {
 app.use(express.static(path.join(__dirname, '../dist')));
 
 // Har qanday boshqa so'rov kelganda React sahifasini qaytarish (Client-side Routing uchun)
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../dist', 'index.html'));
+app.get('(*)', (req, res) => {
+      res.sendFile(path.join(__dirname, '../dist', 'index.html'));
 });
 
 app.listen(PORT, () => {
