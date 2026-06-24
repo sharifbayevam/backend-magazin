@@ -194,9 +194,9 @@ app.get('/api/analytics', (req, res) => {
 // React tayyor build fayllarini (dist papkasini) ko'rsatish
 app.use(express.static(path.join(__dirname, '../dist')));
 
-// Har qanday boshqa so'rovlar kelganda oddiy xabar qaytarish
+// Express 5 versiyasi uchun xavfsiz universal uslub (Catch-all middleware)
 app.use((req, res) => {
-  res.status(404).send('Backend Server is Running successfully!');
+  res.status(200).send('Backend Server is Running Successfully!');
 });
 
 app.listen(PORT, () => {
