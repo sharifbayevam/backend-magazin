@@ -190,7 +190,6 @@ app.get('/api/analytics', (req, res) => {
     });
 });
 
-const path = require('path');
 
 // React tayyor build fayllarini (dist papkasini) ko'rsatish
 app.use(express.static(path.join(__dirname, '../dist')));
