@@ -194,8 +194,9 @@ app.get('/api/analytics', (req, res) => {
 // React tayyor build fayllarini (dist papkasini) ko'rsatish
 app.use(express.static(path.join(__dirname, '../dist')));
 
-app.get('/:any*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+// Har qanday boshqa so'rovlar kelganda oddiy xabar qaytarish
+app.use((req, res) => {
+  res.status(404).send('Backend Server is Running successfully!');
 });
 
 app.listen(PORT, () => {
