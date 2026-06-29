@@ -75,7 +75,7 @@ app.get('/api/products/barcode/:code', async (req, res) => {
     }
 });
 
-// Omborga yangi tovar qo'shish (Xatoliklardan xavfsiz format)
+// Omborga yangi tovar qo'shish (Partiya kelgan sanasi avtomat yoziladi)
 app.post('/api/products', async (req, res) => {
     try {
         const { barcode, name, category, stock, cost_price, price } = req.body;
@@ -89,7 +89,8 @@ app.post('/api/products', async (req, res) => {
             category: category ? String(category).trim() : 'Boshqa', 
             stock: Number(stock) || 0, 
             cost_price: Number(cost_price) || 0, 
-            price: Number(price) || 0 
+            price: Number(price) || 0,
+            arrival_date: new Date().toISOString() // 📅 TOVAR CHINDAN HAM QACHON KELGANLIGI SANASI
         };
 
         if (barcode && String(barcode).trim() !== "") {
@@ -132,7 +133,7 @@ app.delete('/api/products/:id', async (req, res) => {
     💳 2. KASSA SAVDOSI VA NASIYA (QARZ) TIZIMI API
    ========================================================================== */
 
-// To'lov qilish va savdoni yakunlash
+// To'lov qilish va savdoni yakunlash (Sof foyda dinamik ravishda shu yerda hisoblanadi!)
 app.post('/api/sales', async (req, res) => {
     const { cartItems, paymentMethod, customerId, totalSum, cardNumber } = req.body; 
 
@@ -141,11 +142,13 @@ app.post('/api/sales', async (req, res) => {
     }
 
     try {
-        // 1. Ombordan tovar miqdorini kamaytirish
+        let totalProfit = 0; // Sotuvdagi jami sof foyda yig'indisi
+
+        // 1. Ombordan tovar miqdorini kamaytirish va foyda hisoblash
         for (const item of cartItems) {
             const { data: prod, error: fetchErr } = await supabase
                 .from('products')
-                .select('stock, name')
+                .select('stock, name, cost_price, price')
                 .eq('id', item.id)
                 .single();
 
@@ -156,6 +159,11 @@ app.post('/api/sales', async (req, res) => {
                 return res.status(400).json({ error: `Omborda ${prod.name} yetarli emas!` });
             }
 
+            // Har bir tovardan kelgan sof foyda: (Sotish - Tannarx) * Sotilgan soni
+            const itemProfit = (Number(prod.price) - Number(prod.cost_price)) * Number(item.quantity);
+            totalProfit += itemProfit;
+
+            // Ombordagi qoldiqni yangilash
             await supabase
                 .from('products')
                 .update({ stock: prod.stock - Number(item.quantity) })
@@ -176,12 +184,15 @@ app.post('/api/sales', async (req, res) => {
                 .eq('id', customerId);
         }
 
-        // 3. Savdo tarixiga yozish
+        // 3. Savdo tarixiga yozish (Foyda, Sana va To'lov holati bilan)
         await supabase.from('sales_history').insert([{
             total_sum: Number(totalSum),
+            profit_sum: totalProfit, // 💰 SOF FOYDA BAZAGA SAQLANDI
             payment_method: paymentMethod,
             customer_id: customerId ? Number(customerId) : null,
-            card_number: paymentMethod === 'karta' ? String(cardNumber) : null
+            card_number: paymentMethod === 'karta' ? String(cardNumber) : null,
+            is_paid: paymentMethod !== 'nasiya', // Nasiya bo'lsa to'lanmagan (false) bo'ladi
+            sale_date: new Date().toISOString() // 📅 SOTILGAN SANA VA VAQTI
         }]);
 
         return res.json({ success: true, message: "To'lov muvaffaqiyatli qabul qilindi!" });
@@ -256,23 +267,44 @@ app.delete('/api/customers/:id', async (req, res) => {
 
 
 /* ==========================================================================
-    📊 4. ANALITIKA API
+    📊 4. ANALITIKA API (Mukammallashtirilgan variant)
    ========================================================================== */
 app.get('/api/analytics', async (req, res) => {
     try {
-        const { data, error } = await supabase.from('sales_history').select('total_sum, payment_method');
+        const { data: sales, error } = await supabase.from('sales_history').select('*');
         if (error) return res.status(500).json({ error: error.message });
 
-        let naqd_tushum = 0, karta_tushum = 0, nasiya_savdo = 0;
-        if (data) {
-            data.forEach(sale => {
+        let naqd_tushum = 0;
+        let karta_tushum = 0;
+        let nasiya_savdo = 0;
+        let jami_sof_foyda = 0;
+
+        if (sales) {
+            sales.forEach(sale => {
                 const sum = Number(sale.total_sum) || 0;
+                const profit = Number(sale.profit_sum) || 0;
+
+                jami_sof_foyda += profit; // Real sotuvlardan yig'ilgan aniq sof foyda
+
                 if (sale.payment_method === 'naqd') naqd_tushum += sum;
                 else if (sale.payment_method === 'karta') karta_tushum += sum;
                 else if (sale.payment_method === 'nasiya') nasiya_savdo += sum;
             });
         }
-        res.json({ naqd_tushum, karta_tushum, nasiya_savdo, jami_savdolar_soni: data ? data.length : 0 });
+
+        // Ombordagi tugayotgan tovarlarni hisoblash
+        const { data: products } = await supabase.from('products').select('stock');
+        let tugayotgan_tovar_soni = products ? products.filter(p => Number(p.stock) <= 5).length : 0;
+
+        // Frontend o'zgaruvchilari nomlariga 100% moslab jo'natamiz
+        res.json({ 
+            sof_foyda: jami_sof_foyda, 
+            naqd_tushum, 
+            karta_tushum, 
+            nasiya_savdo, 
+            jami_savdolar_soni: sales ? sales.length : 0,
+            tugayotgan_tovar_soni
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
