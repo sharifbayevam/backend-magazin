@@ -50,31 +50,34 @@ app.get('/api/products', async (req, res) => {
     res.json(data || []);
 });
 
-// Yangi tovar qo'shish
+// Yangi tovar qo'shish (XATOLIK TUZATILDI)
 app.post('/api/products', async (req, res) => {
     const { barcode, name, category, stock, cost_price, price } = req.body;
     
     const { data, error } = await supabase
         .from('products')
         .insert([{ 
-            barcode, 
-            name, 
+            barcode: barcode ? String(barcode).trim() : null, 
+            name: String(name).trim(), 
             category: category || 'Boshqa', 
-            stock: Number(stock), 
-            cost_price: Number(cost_price), 
-            price: Number(price) 
+            stock: Number(stock) || 0, 
+            cost_price: Number(cost_price) || 0, 
+            price: Number(price) || 0 
         }])
-        .select()
-        .single();
+        .select(); // Bu yerda .single() olib tashlandi, chunki u 500 error berayotgan edi
 
-    if (error) return res.status(500).json({ error: "Shtrix-kod takrorlanmas bo'lishi kerak yoki xatolik yuz berdi!" });
-    res.json(data);
+    if (error) {
+        console.error("Supabase Error:", error);
+        return res.status(500).json({ error: "Shtrix-kod takrorlanmas bo'lishi kerak yoki xatolik yuz berdi!" });
+    }
+    
+    res.json(data ? data[0] : { success: true });
 });
 
 // Ombordan mahsulotni o'chirish
 app.delete('/api/products/:id', async (req, res) => {
     const { id } = req.params;
-    const { error, status } = await supabase
+    const { error } = await supabase
         .from('products')
         .delete()
         .eq('id', id);
@@ -85,7 +88,7 @@ app.delete('/api/products/:id', async (req, res) => {
 
 
 /* ==========================================================================
-    💳 2. KASSA SAVDOSI (TRANZAKSIYA VA PLASTIK KARTA RAQAMI INTEGRATSIYASI)
+    💳 2. KASSA SAVDOSI
    ========================================================================== */
 
 app.post('/api/sales', async (req, res) => {
@@ -96,7 +99,6 @@ app.post('/api/sales', async (req, res) => {
     }
 
     try {
-        // A. Ombordagi qoldiqlarni tekshirish va ayirish
         for (const item of cartItems) {
             const { data: prod, error: fetchErr } = await supabase
                 .from('products')
@@ -115,7 +117,6 @@ app.post('/api/sales', async (req, res) => {
             if (updErr) throw new Error("Ombor qoldig'ini yangilashda xatolik yuz berdi.");
         }
 
-        // B. Nasiya bo'lsa mijoz qarzini yangilash
         if (paymentMethod === 'nasiya' && customerId) {
             const { data: cust, error: custFetchErr } = await supabase
                 .from('customers')
@@ -133,14 +134,13 @@ app.post('/api/sales', async (req, res) => {
             if (custUpdErr) throw new Error("Mijoz qarzini yangilashda xatolik!");
         }
 
-        // D. Savdo tarixiga yozish (Karta raqami bilan birga)
         const { error: historyErr } = await supabase
             .from('sales_history')
             .insert([{
                 total_sum: Number(totalSum),
                 payment_method: paymentMethod,
                 customer_id: customerId ? Number(customerId) : null,
-                card_number: paymentMethod === 'karta' ? cardNumber : null // Karta raqami saqlanadi
+                card_number: paymentMethod === 'karta' ? cardNumber : null
             }]);
 
         if (historyErr) throw new Error("Savdo tarixiga yozishda xatolik yuz berdi.");
@@ -172,11 +172,10 @@ app.post('/api/customers', async (req, res) => {
     const { data, error } = await supabase
         .from('customers')
         .insert([{ name, phone, debt: 0 }])
-        .select()
-        .single();
+        .select();
 
     if (error) return res.status(500).json({ error: error.message });
-    res.json(data);
+    res.json(data ? data[0] : { success: true });
 });
 
 app.delete('/api/customers/:id', async (req, res) => {
@@ -216,12 +215,10 @@ app.get('/api/analytics', async (req, res) => {
     res.json({ naqd_tushum, karta_tushum, nasiya_savdo, jami_savdolar });
 });
 
-// Asosiy root tekshiruvi
 app.get('/', (req, res) => {
     res.send('Backend Server with Supabase is Running Successfully!');
 });
 
-// Universal catch-all middleware
 app.use((req, res) => {
     if (req.path.startsWith('/api')) {
         return res.status(404).json({ error: "Bunday API manzili mavjud emas!" });
