@@ -88,9 +88,10 @@ app.delete('/api/products/:id', async (req, res) => {
 
 
 /* ==========================================================================
-    💳 2. KASSA SAVDOSI
+    💳 2. KASSA SAVDOSI VA SAVDOLAR TARIXI API
    ========================================================================== */
 
+// Yangi savdo qo'shish (Sotuv jarayoni)
 app.post('/api/sales', async (req, res) => {
     const { cartItems, paymentMethod, customerId, totalSum, cardNumber } = req.body; 
 
@@ -150,6 +151,17 @@ app.post('/api/sales', async (req, res) => {
     } catch (err) {
         return res.status(400).json({ error: err.message });
     }
+});
+
+// ✨ YANGI QO'SHILGAN QISM: Savdolar tarixini front-endga yuborish (404 xatoni to'g'rilaydi)
+app.get('/api/sales', async (req, res) => {
+    const { data, error } = await supabase
+        .from('sales_history')
+        .select('*')
+        .order('id', { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
 });
 
 
