@@ -1,160 +1,155 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
 const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
+require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 5000; // Render porti uchun moslashtirildi
+const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
 
-// SQLite bazaga ulanish (Faqat bitta unikal fayl - magazin.db)
-const dbPath = path.resolve(__dirname, 'magazin.db');
-const db = new sqlite3.Database(dbPath, (err) => {
-    if (err) console.error("Xatolik:", err.message);
-    else console.log("SQLite bazaga muvaffaqiyatli ulandi (magazin.db).");
-});
+// 🌐 SUPABASE ONLAYN BAZASIGA ULANISH
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
 
-// Jadvallarni yaratish va tekshirish
-db.serialize(() => {
-    // Tovar jadvali (Shtrix-kod bilan)
-    db.run(`
-        CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            barcode TEXT UNIQUE,
-            name TEXT NOT NULL,
-            category TEXT DEFAULT 'Boshqa',
-            stock INTEGER DEFAULT 0,
-            cost_price REAL DEFAULT 0,
-            price REAL DEFAULT 0
-        )
-    `);
+if (!supabaseUrl || !supabaseKey) {
+    console.error("❌ Xatolik: .env faylida SUPABASE_URL yoki SUPABASE_KEY kiritilmagan!");
+}
 
-    // Mijozlar jadvali
-    db.run(`
-        CREATE TABLE IF NOT EXISTS customers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            phone TEXT DEFAULT 'Kiritilmagan',
-            debt REAL DEFAULT 0
-        )
-    `);
-
-    // Savdo tarixi jadvali (Karta, Naqd va Nasiya hisoboti uchun)
-    db.run(`
-        CREATE TABLE IF NOT EXISTS sales_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            total_sum REAL,
-            payment_method TEXT, -- 'naqd', 'karta' yoki 'nasiya'
-            customer_id INTEGER,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-});
+const supabase = createClient(supabaseUrl, supabaseKey);
+console.log("⚡ Supabase PostgreSQL onlayn bazasiga muvaffaqiyatli ulandi.");
 
 /* ==========================================================================
-    🔍 1. SHTRIX-KOD (BARCODE) FUNKSIYALARI
+    🔍 1. SHTRIX-KOD VA MAHSULOTLAR API (SUPABASE)
    ========================================================================== */
 
-// Shtrix-kod skanerlanganda tovarni bazadan qidirib topish API
-app.get('/api/products/barcode/:code', (req, res) => {
+// Shtrix-kod orqali tovarni bazadan qidirish
+app.get('/api/products/barcode/:code', async (req, res) => {
     const { code } = req.params;
-    db.get("SELECT * FROM products WHERE barcode = ?", [code], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!row) return res.status(404).json({ message: "Bu shtrix-kodga mos mahsulot topilmadi!" });
-        res.json(row);
-    });
+    const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('barcode', code)
+        .maybeSingle();
+
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ message: "Bu shtrix-kodga mos mahsulot topilmadi!" });
+    res.json(data);
 });
 
 // Ombordagi barcha tovarlarni olish
-app.get('/api/products', (req, res) => {
-    db.all("SELECT * FROM products ORDER BY id DESC", [], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows || []);
-    });
+app.get('/api/products', async (req, res) => {
+    const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('id', { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
 });
 
-// Yangi tovar qo'shish (Shtrix-kod bilan)
-app.post('/api/products', (req, res) => {
+// Yangi tovar qo'shish
+app.post('/api/products', async (req, res) => {
     const { barcode, name, category, stock, cost_price, price } = req.body;
-    const query = `INSERT INTO products (barcode, name, category, stock, cost_price, price) VALUES (?, ?, ?, ?, ?, ?)`;
-    db.run(query, [barcode, name, category, Number(stock), Number(cost_price), Number(price)], function(err) {
-        if (err) return res.status(500).json({ error: "Shtrix-kod takrorlanmas bo'lishi kerak yoki xatolik yuz berdi!" });
-        res.json({ id: this.lastID, barcode, name, category, stock, cost_price, price });
-    });
+    
+    const { data, error } = await supabase
+        .from('products')
+        .insert([{ 
+            barcode, 
+            name, 
+            category: category || 'Boshqa', 
+            stock: Number(stock), 
+            cost_price: Number(cost_price), 
+            price: Number(price) 
+        }])
+        .select()
+        .single();
+
+    if (error) return res.status(500).json({ error: "Shtrix-kod takrorlanmas bo'lishi kerak yoki xatolik yuz berdi!" });
+    res.json(data);
 });
 
-// ❌ OMBORDAN MAHSULOTNI O'CHIRISH API (ID BO'YICHA XAVFSIZ O'CHIRISH)
-app.delete('/api/products/:id', (req, res) => {
+// Ombordan mahsulotni o'chirish
+app.delete('/api/products/:id', async (req, res) => {
     const { id } = req.params;
-    db.run("DELETE FROM products WHERE id = ?", [id], function(err) {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
-        if (this.changes === 0) {
-            return res.status(404).json({ message: "O'chirilishi kerak bo'lgan mahsulot topilmadi!" });
-        }
-        res.json({ success: true, message: "Mahsulot ombordan muvaffaqiyatli o'chirildi." });
-    });
+    const { error, status } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', id);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true, message: "Mahsulot ombordan muvaffaqiyatli o'chirildi." });
 });
 
 
 /* ==========================================================================
-    💳 2. KASSA SAVDOSI (KARTA, NAQD VA NASIYA INTEGRATSIYASI)
+    💳 2. KASSA SAVDOSI (TRANZAKSIYA VA PLASTIK KARTA RAQAMI INTEGRATSIYASI)
    ========================================================================== */
 
-app.post('/api/sales', (req, res) => {
-    const { cartItems, paymentMethod, customerId, totalSum } = req.body; 
+app.post('/api/sales', async (req, res) => {
+    const { cartItems, paymentMethod, customerId, totalSum, cardNumber } = req.body; 
 
     if (!cartItems || cartItems.length === 0) {
         return res.status(400).json({ error: "Savat bo'sh!" });
     }
 
-    db.serialize(() => {
-        db.run("BEGIN TRANSACTION");
-        let hasError = false;
-        let errorMessage = "";
+    try {
+        // A. Ombordagi qoldiqlarni tekshirish va ayirish
+        for (const item of cartItems) {
+            const { data: prod, error: fetchErr } = await supabase
+                .from('products')
+                .select('stock, name')
+                .eq('id', item.id)
+                .single();
 
-        // A. Ombordan mahsulot qoldig'ini ayirish
-        cartItems.forEach(item => {
-            db.run(
-                `UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?`,
-                [item.quantity, item.id, item.quantity],
-                function(err) {
-                    if (err) { hasError = true; errorMessage = err.message; }
-                    else if (this.changes === 0) { hasError = true; errorMessage = `Omborda ${item.name} yetarli emas!`; }
-                }
-            );
-        });
+            if (fetchErr || !prod) throw new Error(`Mahsulot topilmadi: ID ${item.id}`);
+            if (prod.stock < item.quantity) throw new Error(`Omborda ${prod.name} yetarli emas!`);
 
-        // B. Agar to'lov turi NASIYA bo'lsa, mijoz balansiga qarz yozish
-        if (paymentMethod === 'nasiya' && customerId) {
-            db.run(
-                `UPDATE customers SET debt = debt + ? WHERE id = ?`,
-                [totalSum, customerId],
-                function(err) { if (err) { hasError = true; errorMessage = "Mijoz qarzini yangilashda xatolik!"; } }
-            );
+            const { error: updErr } = await supabase
+                .from('products')
+                .update({ stock: prod.stock - item.quantity })
+                .eq('id', item.id);
+
+            if (updErr) throw new Error("Ombor qoldig'ini yangilashda xatolik yuz berdi.");
         }
 
-        // D. Savdo tarixiga kiritish (Karta yoki Naqd pul ekanligini ajratish uchun)
-        db.run(
-            `INSERT INTO sales_history (total_sum, payment_method, customer_id) VALUES (?, ?, ?)`,
-            [totalSum, paymentMethod, customerId || null],
-            function(err) { if (err) { hasError = true; errorMessage = "Tarixga yozishda xatolik!"; } }
-        );
+        // B. Nasiya bo'lsa mijoz qarzini yangilash
+        if (paymentMethod === 'nasiya' && customerId) {
+            const { data: cust, error: custFetchErr } = await supabase
+                .from('customers')
+                .select('debt')
+                .eq('id', customerId)
+                .single();
 
-        // Yakuniy tekshiruv (Tranzaksiyani yopish)
-        setTimeout(() => {
-            if (hasError) {
-                db.run("ROLLBACK");
-                return res.status(400).json({ error: errorMessage });
-            } else {
-                db.run("COMMIT");
-                return res.json({ success: true, message: `To'lov ${paymentMethod} orqali muvaffaqiyatli qabul qilindi!` });
-            }
-        }, 40);
-    });
+            if (custFetchErr) throw new Error("Mijoz ma'lumotlarini yuklashda xatolik.");
+
+            const { error: custUpdErr } = await supabase
+                .from('customers')
+                .update({ debt: (cust.debt || 0) + Number(totalSum) })
+                .eq('id', customerId);
+
+            if (custUpdErr) throw new Error("Mijoz qarzini yangilashda xatolik!");
+        }
+
+        // D. Savdo tarixiga yozish (Karta raqami bilan birga)
+        const { error: historyErr } = await supabase
+            .from('sales_history')
+            .insert([{
+                total_sum: Number(totalSum),
+                payment_method: paymentMethod,
+                customer_id: customerId ? Number(customerId) : null,
+                card_number: paymentMethod === 'karta' ? cardNumber : null // Karta raqami saqlanadi
+            }]);
+
+        if (historyErr) throw new Error("Savdo tarixiga yozishda xatolik yuz berdi.");
+
+        return res.json({ success: true, message: `To'lov ${paymentMethod} orqali muvaffaqiyatli qabul qilindi!` });
+
+    } catch (err) {
+        return res.status(400).json({ error: err.message });
+    }
 });
 
 
@@ -162,57 +157,72 @@ app.post('/api/sales', (req, res) => {
     👥 3. MIJOZLAR REYESTRI API
    ========================================================================== */
 
-app.get('/api/customers', (req, res) => {
-    db.all("SELECT * FROM customers ORDER BY id DESC", [], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows || []);
-    });
+app.get('/api/customers', async (req, res) => {
+    const { data, error } = await supabase
+        .from('customers')
+        .select('*')
+        .order('id', { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
 });
 
-app.post('/api/customers', (req, res) => {
+app.post('/api/customers', async (req, res) => {
     const { name, phone } = req.body;
-    db.run(`INSERT INTO customers (name, phone, debt) VALUES (?, ?, 0)`, [name, phone], function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ id: this.lastID, name, phone, debt: 0 });
-    });
+    const { data, error } = await supabase
+        .from('customers')
+        .insert([{ name, phone, debt: 0 }])
+        .select()
+        .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
 });
 
-app.delete('/api/customers/:id', (req, res) => {
-    db.run(`DELETE FROM customers WHERE id = ?`, req.params.id, function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
-    });
+app.delete('/api/customers/:id', async (req, res) => {
+    const { error } = await supabase
+        .from('customers')
+        .delete()
+        .eq('id', req.params.id);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true });
 });
 
 
 /* ==========================================================================
-    📊 4. ANALITIKA (KARTA / NAQD DIAGRAMMASI UCHUN)
+    📊 4. ANALITIKA API
    ========================================================================== */
-app.get('/api/analytics', (req, res) => {
-    const query = `
-        SELECT 
-            COALESCE(SUM(CASE WHEN payment_method = 'naqd' THEN total_sum ELSE 0 END), 0) as naqd_tushum,
-            COALESCE(SUM(CASE WHEN payment_method = 'karta' THEN total_sum ELSE 0 END), 0) as karta_tushum,
-            COALESCE(SUM(CASE WHEN payment_method = 'nasiya' THEN total_sum ELSE 0 END), 0) as nasiya_savdo,
-            COUNT(id) as jami_savdolar
-        FROM sales_history
-    `;
-    db.get(query, [], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(row || { naqd_tushum: 0, karta_tushum: 0, nasiya_savdo: 0, jami_savdolar: 0 });
-    });
+app.get('/api/analytics', async (req, res) => {
+    const { data, error } = await supabase
+        .from('sales_history')
+        .select('total_sum, payment_method');
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    let naqd_tushum = 0;
+    let karta_tushum = 0;
+    let nasiya_savdo = 0;
+    let jami_savdolar = data ? data.length : 0;
+
+    if (data) {
+        data.forEach(sale => {
+            if (sale.payment_method === 'naqd') naqd_tushum += sale.total_sum;
+            else if (sale.payment_method === 'karta') karta_tushum += sale.total_sum;
+            else if (sale.payment_method === 'nasiya') nasiya_savdo += sale.total_sum;
+        });
+    }
+
+    res.json({ naqd_tushum, karta_tushum, nasiya_savdo, jami_savdolar });
 });
 
-// Server ishlayotganini bildirish uchun asosiy tekshirish yo'li (Catch-all middleware'dan tepaga olindi)
+// Asosiy root tekshiruvi
 app.get('/', (req, res) => {
-    res.send('Backend Server is Running Successfully!');
+    res.send('Backend Server with Supabase is Running Successfully!');
 });
 
-// React tayyor build fayllarini (dist papkasini) ko'rsatish
-app.use(express.static(path.join(__dirname, '../dist')));
-
-// Xatolikni oldini olish uchun universal catch-all (Faqat API bo'lmagan marshrutlar uchun)
-app.use((req, res, next) => {
+// Universal catch-all middleware
+app.use((req, res) => {
     if (req.path.startsWith('/api')) {
         return res.status(404).json({ error: "Bunday API manzili mavjud emas!" });
     }

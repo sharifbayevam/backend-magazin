@@ -4,14 +4,15 @@
   "description": "",
   "main": "server.js",
   "type": "commonjs",
-"scripts": {
+  "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
     "better-sqlite3": "^12.11.1",
     "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "sqlite3": "^5.1.7",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
