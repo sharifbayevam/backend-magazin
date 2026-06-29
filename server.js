@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
@@ -19,79 +18,103 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey);
-console.log("⚡ Supabase PostgreSQL onlayn bazasiga muvaffaqiyatli ulandi.");
+
+// ⚡ BAZA BILAN ALOQANI VA JADVALLARNI TEKSHIRISH
+async function initDatabase() {
+    console.log("⚡ Supabase PostgreSQL bazasi tekshirilmoqda...");
+    // Bu qism jadvallarda xatolik bo'lsa Render loglarida aniq ko'rsatib beradi
+    const { error } = await supabase.from('products').select('id').limit(1);
+    if (error) {
+        console.error("⚠️ Diqqat: 'products' jadvalida muammo bor yoki u mavjud emas!", error.message);
+    } else {
+        console.log("✅ 'products' jadvali bazada mavjud va tayyor.");
+    }
+}
+initDatabase();
 
 /* ==========================================================================
-    🔍 1. SHTRIX-KOD VA MAHSULOTLAR API (SUPABASE)
+    🔍 1. SHTRIX-KOD VA MAHSULOTLAR API
    ========================================================================== */
 
 // Shtrix-kod orqali tovarni bazadan qidirish
 app.get('/api/products/barcode/:code', async (req, res) => {
-    const { code } = req.params;
-    const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('barcode', String(code).trim())
-        .maybeSingle();
+    try {
+        const { code } = req.params;
+        const { data, error } = await supabase
+            .from('products')
+            .select('*')
+            .eq('barcode', String(code).trim())
+            .maybeSingle();
 
-    if (error) return res.status(500).json({ error: error.message });
-    if (!data) return res.status(404).json({ message: "Bu shtrix-kodga mos mahsulot topilmadi!" });
-    res.json(data);
+        if (error) return res.status(500).json({ error: error.message });
+        if (!data) return res.status(404).json({ message: "Bu shtrix-kodga mos mahsulot topilmadi!" });
+        res.json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Ombordagi barcha tovarlarni olish
 app.get('/api/products', async (req, res) => {
-    const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .order('id', { ascending: false });
+    try {
+        const { data, error } = await supabase
+            .from('products')
+            .select('*')
+            .order('id', { ascending: false });
 
-    if (error) return res.status(500).json({ error: error.message });
-    res.json(data || []);
+        if (error) return res.status(500).json({ error: error.message });
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Yangi tovar qo'shish (MUTLAQ HIMOYA BILAN)
 app.post('/api/products', async (req, res) => {
-    const { barcode, name, category, stock, cost_price, price } = req.body;
-    
-    // Ma'lumotlarni PostgreSQL tushunadigan toza turlarga o'giramiz
-    const cleanProduct = { 
-        barcode: barcode ? String(barcode).trim() : null, 
-        name: String(name).trim(), 
-        // AGAR jadvalda category ustuni muammo qilayotgan bo'lsa, xatolik bermasligi uchun
-        category: category && typeof category === 'string' ? category.trim() : 'Boshqa', 
-        stock: parseInt(stock, 10) || 0, 
-        cost_price: parseFloat(cost_price) || 0, 
-        price: parseFloat(price) || 0 
-    };
-
-    const { data, error } = await supabase
-        .from('products')
-        .insert([cleanProduct])
-        .select();
-
-    if (error) {
-        console.error("❌ SUPABASE BAZA XATOLIGI:", error.message, error.details, error.hint);
+    try {
+        const { barcode, name, category, stock, cost_price, price } = req.body;
         
-        // Front-endda aniq nima xato bo'lganini bilishimiz uchun haqiqiy xatoni qaytaramiz:
-        return res.status(500).json({ 
-            error: `Baza xatoli: ${error.message}. Tafsilot: ${error.details || 'yoq'}` 
-        });
+        // Agar eng asosiy ma'lumotlar kelmagan bo'lsa, bazaga yubormaymiz
+        if (!name) {
+            return res.status(400).json({ error: "Mahsulot nomi kiritilishi shart!" });
+        }
+
+        const cleanProduct = { 
+            barcode: barcode ? String(barcode).trim() : null, 
+            name: String(name).trim(), 
+            category: category ? String(category).trim() : 'Boshqa', 
+            stock: Number(stock) || 0, 
+            cost_price: Number(cost_price) || 0, 
+            price: Number(price) || 0 
+        };
+
+        const { data, error } = await supabase
+            .from('products')
+            .insert([cleanProduct])
+            .select();
+
+        if (error) {
+            console.error("❌ SUPABASE BAZA XATOLIGI:", error);
+            return res.status(500).json({ error: `Baza xatoligi: ${error.message}. Tafsilot: ${error.details || 'yoq'}` });
+        }
+        
+        res.json(data ? data[0] : { success: true });
+    } catch (err) {
+        console.error("❌ KUTILMAGAN BACKEND XATOLIGI:", err);
+        res.status(500).json({ error: `Server ichki xatoligi: ${err.message}` });
     }
-    
-    res.json(data ? data[0] : { success: true });
 });
 
 // Ombordan mahsulotni o'chirish
 app.delete('/api/products/:id', async (req, res) => {
-    const { id } = req.params;
-    const { error } = await supabase
-        .from('products')
-        .delete()
-        .eq('id', id);
-
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ success: true, message: "Mahsulot ombordan muvaffaqiyatli o'chirildi." });
+    try {
+        const { id } = req.params;
+        const { error } = await supabase.from('products').delete().eq('id', id);
+        if (error) return res.status(500).json({ error: error.message });
+        res.json({ success: true, message: "Mahsulot o'chirildi." });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 
@@ -99,7 +122,6 @@ app.delete('/api/products/:id', async (req, res) => {
     💳 2. KASSA SAVDOSI VA SAVDOLAR TARIXI API
    ========================================================================== */
 
-// Yangi savdo qo'shish (Sotuv jarayoni)
 app.post('/api/sales', async (req, res) => {
     const { cartItems, paymentMethod, customerId, totalSum, cardNumber } = req.body; 
 
@@ -116,58 +138,31 @@ app.post('/api/sales', async (req, res) => {
                 .single();
 
             if (fetchErr || !prod) throw new Error(`Mahsulot topilmadi: ID ${item.id}`);
-            if (prod.stock < parseInt(item.quantity, 10)) throw new Error(`Omborda ${prod.name} yetarli emas!`);
+            if (prod.stock < Number(item.quantity)) throw new Error(`Omborda ${prod.name} yetarli emas!`);
 
-            const { error: updErr } = await supabase
-                .from('products')
-                .update({ stock: prod.stock - parseInt(item.quantity, 10) })
-                .eq('id', item.id);
-
-            if (updErr) throw new Error("Ombor qoldig'ini yangilashda xatolik yuz berdi.");
+            await supabase.from('products').update({ stock: prod.stock - Number(item.quantity) }).eq('id', item.id);
         }
 
         if (paymentMethod === 'nasiya' && customerId) {
-            const { data: cust, error: custFetchErr } = await supabase
-                .from('customers')
-                .select('debt')
-                .eq('id', customerId)
-                .single();
-
-            if (custFetchErr) throw new Error("Mijoz ma'lumotlarini yuklashda xatolik.");
-
-            const { error: custUpdErr } = await supabase
-                .from('customers')
-                .update({ debt: (cust.debt || 0) + parseFloat(totalSum) })
-                .eq('id', customerId);
-
-            if (custUpdErr) throw new Error("Mijoz qarzini yangilashda xatolik!");
+            const { data: cust } = await supabase.from('customers').select('debt').eq('id', customerId).single();
+            await supabase.from('customers').update({ debt: (cust?.debt || 0) + Number(totalSum) }).eq('id', customerId);
         }
 
-        const { error: historyErr } = await supabase
-            .from('sales_history')
-            .insert([{
-                total_sum: parseFloat(totalSum),
-                payment_method: paymentMethod,
-                customer_id: customerId ? Number(customerId) : null,
-                card_number: paymentMethod === 'karta' ? cardNumber : null
-            }]);
+        await supabase.from('sales_history').insert([{
+            total_sum: Number(totalSum),
+            payment_method: paymentMethod,
+            customer_id: customerId ? Number(customerId) : null,
+            card_number: paymentMethod === 'karta' ? cardNumber : null
+        }]);
 
-        if (historyErr) throw new Error("Savdo tarixiga yozishda xatolik yuz berdi.");
-
-        return res.json({ success: true, message: `To'lov ${paymentMethod} orqali muvaffaqiyatli qabul qilindi!` });
-
+        return res.json({ success: true, message: `To'lov muvaffaqiyatli qabul qilindi!` });
     } catch (err) {
         return res.status(400).json({ error: err.message });
     }
 });
 
-// Savdolar tarixini front-endga yuklab berish
 app.get('/api/sales', async (req, res) => {
-    const { data, error } = await supabase
-        .from('sales_history')
-        .select('*')
-        .order('id', { ascending: false });
-
+    const { data, error } = await supabase.from('sales_history').select('*').order('id', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     res.json(data || []);
 });
@@ -178,32 +173,20 @@ app.get('/api/sales', async (req, res) => {
    ========================================================================== */
 
 app.get('/api/customers', async (req, res) => {
-    const { data, error } = await supabase
-        .from('customers')
-        .select('*')
-        .order('id', { ascending: false });
-
+    const { data, error } = await supabase.from('customers').select('*').order('id', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     res.json(data || []);
 });
 
 app.post('/api/customers', async (req, res) => {
     const { name, phone } = req.body;
-    const { data, error } = await supabase
-        .from('customers')
-        .insert([{ name: String(name).trim(), phone: phone || 'Kiritilmagan', debt: 0 }])
-        .select();
-
+    const { data, error } = await supabase.from('customers').insert([{ name: String(name).trim(), phone: phone || '', debt: 0 }]).select();
     if (error) return res.status(500).json({ error: error.message });
     res.json(data ? data[0] : { success: true });
 });
 
 app.delete('/api/customers/:id', async (req, res) => {
-    const { error } = await supabase
-        .from('customers')
-        .delete()
-        .eq('id', req.params.id);
-
+    const { error } = await supabase.from('customers').delete().eq('id', req.params.id);
     if (error) return res.status(500).json({ error: error.message });
     res.json({ success: true });
 });
@@ -213,40 +196,26 @@ app.delete('/api/customers/:id', async (req, res) => {
     📊 4. ANALITIKA API
    ========================================================================== */
 app.get('/api/analytics', async (req, res) => {
-    const { data, error } = await supabase
-        .from('sales_history')
-        .select('total_sum, payment_method');
-
+    const { data, error } = await supabase.from('sales_history').select('total_sum, payment_method');
     if (error) return res.status(500).json({ error: error.message });
 
-    let naqd_tushum = 0;
-    let karta_tushum = 0;
-    let nasiya_savdo = 0;
-    let jami_savdolar = data ? data.length : 0;
-
+    let naqd_tushum = 0, karta_tushum = 0, nasiya_savdo = 0;
     if (data) {
         data.forEach(sale => {
-            const sum = parseFloat(sale.total_sum) || 0;
+            const sum = Number(sale.total_sum) || 0;
             if (sale.payment_method === 'naqd') naqd_tushum += sum;
             else if (sale.payment_method === 'karta') karta_tushum += sum;
             else if (sale.payment_method === 'nasiya') nasiya_savdo += sum;
         });
     }
-
-    res.json({ naqd_tushum, karta_tushum, nasiya_savdo, jami_savdolar });
+    res.json({ naqd_tushum, karta_tushum, nasiya_savdo, jami_savdolar: data ? data.length : 0 });
 });
 
-app.get('/', (req, res) => {
-    res.send('Backend Server with Supabase is Running Successfully!');
-});
+app.get('/', (req, res) => res.send('Backend Server is Running Successfully!'));
 
 app.use((req, res) => {
-    if (req.path.startsWith('/api')) {
-        return res.status(404).json({ error: "Bunday API manzili mavjud emas!" });
-    }
+    if (req.path.startsWith('/api')) return res.status(404).json({ error: "Bunday API manzili mavjud emas!" });
     res.status(200).send('Backend Server is Running Successfully!');
 });
 
-app.listen(PORT, () => {
-    console.log(`Premium Backend server port:${PORT} da muvaffaqiyatli ishlamoqda...`);
-});
+app.listen(PORT, () => console.log(`Premium Backend server port:${PORT} da ishlamoqda...`));
