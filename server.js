@@ -4,11 +4,12 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000; // Render porti uchun moslashtirildi
 
 app.use(cors());
 app.use(express.json());
 
+// SQLite bazaga ulanish (Faqat bitta unikal fayl - magazin.db)
 const dbPath = path.resolve(__dirname, 'magazin.db');
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) console.error("Xatolik:", err.message);
@@ -70,7 +71,7 @@ app.get('/api/products/barcode/:code', (req, res) => {
 app.get('/api/products', (req, res) => {
     db.all("SELECT * FROM products ORDER BY id DESC", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
+        res.json(rows || []);
     });
 });
 
@@ -84,7 +85,7 @@ app.post('/api/products', (req, res) => {
     });
 });
 
-// ❌ OMBORDAN MAHSULOTNI O'CHIRISH API (YANGI QO'SHILDI)
+// ❌ OMBORDAN MAHSULOTNI O'CHIRISH API (ID BO'YICHA XAVFSIZ O'CHIRISH)
 app.delete('/api/products/:id', (req, res) => {
     const { id } = req.params;
     db.run("DELETE FROM products WHERE id = ?", [id], function(err) {
@@ -164,7 +165,7 @@ app.post('/api/sales', (req, res) => {
 app.get('/api/customers', (req, res) => {
     db.all("SELECT * FROM customers ORDER BY id DESC", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
+        res.json(rows || []);
     });
 });
 
@@ -190,10 +191,10 @@ app.delete('/api/customers/:id', (req, res) => {
 app.get('/api/analytics', (req, res) => {
     const query = `
         SELECT 
-            SUM(CASE WHEN payment_method = 'naqd' THEN total_sum ELSE 0 END) as naqd_tushum,
-            SUM(CASE WHEN payment_method = 'karta' THEN total_sum ELSE 0 END) as karta_tushum,
-            SUM(CASE WHEN payment_method = 'nasiya' THEN total_sum ELSE 0 END) as nasiya_savdo,
-            COUNT(*) as jami_savdolar
+            COALESCE(SUM(CASE WHEN payment_method = 'naqd' THEN total_sum ELSE 0 END), 0) as naqd_tushum,
+            COALESCE(SUM(CASE WHEN payment_method = 'karta' THEN total_sum ELSE 0 END), 0) as karta_tushum,
+            COALESCE(SUM(CASE WHEN payment_method = 'nasiya' THEN total_sum ELSE 0 END), 0) as nasiya_savdo,
+            COUNT(id) as jami_savdolar
         FROM sales_history
     `;
     db.get(query, [], (err, row) => {
@@ -202,15 +203,22 @@ app.get('/api/analytics', (req, res) => {
     });
 });
 
+// Server ishlayotganini bildirish uchun asosiy tekshirish yo'li (Catch-all middleware'dan tepaga olindi)
+app.get('/', (req, res) => {
+    res.send('Backend Server is Running Successfully!');
+});
 
 // React tayyor build fayllarini (dist papkasini) ko'rsatish
 app.use(express.static(path.join(__dirname, '../dist')));
 
-// Express universal catch-all middleware
-app.use((req, res) => {
-  res.status(200).send('Backend Server is Running Successfully!');
+// Xatolikni oldini olish uchun universal catch-all (Faqat API bo'lmagan marshrutlar uchun)
+app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) {
+        return res.status(404).json({ error: "Bunday API manzili mavjud emas!" });
+    }
+    res.status(200).send('Backend Server is Running Successfully!');
 });
 
 app.listen(PORT, () => {
-    console.log(`Premium Backend server http://localhost:${PORT} portida ishlamoqda...`);
+    console.log(`Premium Backend server port:${PORT} da muvaffaqiyatli ishlamoqda...`);
 });
