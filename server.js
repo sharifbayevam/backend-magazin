@@ -54,7 +54,7 @@ db.serialize(() => {
 });
 
 /* ==========================================================================
-   🔍 1. SHTRIX-KOD (BARCODE) FUNKSIYALARI
+    🔍 1. SHTRIX-KOD (BARCODE) FUNKSIYALARI
    ========================================================================== */
 
 // Shtrix-kod skanerlanganda tovarni bazadan qidirib topish API
@@ -85,14 +85,27 @@ app.post('/api/products', (req, res) => {
     });
 });
 
+// ❌ OMBORDAN MAHSULOTNI O'CHIRISH API (YANGI QO'SHILDI)
+app.delete('/api/products/:id', (req, res) => {
+    const { id } = req.params;
+    db.run("DELETE FROM products WHERE id = ?", [id], function(err) {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        if (this.changes === 0) {
+            return res.status(404).json({ message: "O'chirilishi kerak bo'lgan mahsulot topilmadi!" });
+        }
+        res.json({ success: true, message: "Mahsulot ombordan muvaffaqiyatli o'chirildi." });
+    });
+});
+
 
 /* ==========================================================================
-   💳 2. KASSA SAVDOSI (KARTA, NAQD VA NASIYA INTEGRATSIYASI)
+    💳 2. KASSA SAVDOSI (KARTA, NAQD VA NASIYA INTEGRATSIYASI)
    ========================================================================== */
 
 app.post('/api/sales', (req, res) => {
     const { cartItems, paymentMethod, customerId, totalSum } = req.body; 
-    // paymentMethod frontenddan: 'naqd', 'karta' yoki 'nasiya' bo'lib keladi
 
     if (!cartItems || cartItems.length === 0) {
         return res.status(400).json({ error: "Savat bo'sh!" });
@@ -146,7 +159,7 @@ app.post('/api/sales', (req, res) => {
 
 
 /* ==========================================================================
-   👥 3. MIJOZLAR REYESTRI API
+    👥 3. MIJOZLAR REYESTRI API
    ========================================================================== */
 
 app.get('/api/customers', (req, res) => {
@@ -173,7 +186,7 @@ app.delete('/api/customers/:id', (req, res) => {
 
 
 /* ==========================================================================
-   📊 4. ANALITIKA (KARTA / NAQD DIAGRAMMASI UCHUN)
+    📊 4. ANALITIKA (KARTA / NAQD DIAGRAMMASI UCHUN)
    ========================================================================== */
 app.get('/api/analytics', (req, res) => {
     const query = `
@@ -194,7 +207,7 @@ app.get('/api/analytics', (req, res) => {
 // React tayyor build fayllarini (dist papkasini) ko'rsatish
 app.use(express.static(path.join(__dirname, '../dist')));
 
-// Express 5 versiyasi uchun xavfsiz universal uslub (Catch-all middleware)
+// Express universal catch-all middleware
 app.use((req, res) => {
   res.status(200).send('Backend Server is Running Successfully!');
 });
