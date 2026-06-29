@@ -9,11 +9,10 @@ const PORT = 5000;
 app.use(cors());
 app.use(express.json());
 
-// SQLite bazaga ulanish
 const dbPath = path.resolve(__dirname, 'magazin.db');
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) console.error("Xatolik:", err.message);
-    else console.log("SQLite bazaga muvaffaqiyatli ulandi.");
+    else console.log("SQLite bazaga muvaffaqiyatli ulandi (magazin.db).");
 });
 
 // Jadvallarni yaratish va tekshirish
