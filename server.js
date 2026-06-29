@@ -31,7 +31,7 @@ app.get('/api/products/barcode/:code', async (req, res) => {
     const { data, error } = await supabase
         .from('products')
         .select('*')
-        .eq('barcode', code)
+        .eq('barcode', String(code).trim())
         .maybeSingle();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -50,25 +50,33 @@ app.get('/api/products', async (req, res) => {
     res.json(data || []);
 });
 
-// Yangi tovar qo'shish (XATOLIK TUZATILDI)
+// Yangi tovar qo'shish (MUTLAQ HIMOYA BILAN)
 app.post('/api/products', async (req, res) => {
     const { barcode, name, category, stock, cost_price, price } = req.body;
     
+    // Ma'lumotlarni PostgreSQL tushunadigan toza turlarga o'giramiz
+    const cleanProduct = { 
+        barcode: barcode ? String(barcode).trim() : null, 
+        name: String(name).trim(), 
+        // AGAR jadvalda category ustuni muammo qilayotgan bo'lsa, xatolik bermasligi uchun
+        category: category && typeof category === 'string' ? category.trim() : 'Boshqa', 
+        stock: parseInt(stock, 10) || 0, 
+        cost_price: parseFloat(cost_price) || 0, 
+        price: parseFloat(price) || 0 
+    };
+
     const { data, error } = await supabase
         .from('products')
-        .insert([{ 
-            barcode: barcode ? String(barcode).trim() : null, 
-            name: String(name).trim(), 
-            category: category || 'Boshqa', 
-            stock: Number(stock) || 0, 
-            cost_price: Number(cost_price) || 0, 
-            price: Number(price) || 0 
-        }])
-        .select(); // Bu yerda .single() olib tashlandi, chunki u 500 error berayotgan edi
+        .insert([cleanProduct])
+        .select();
 
     if (error) {
-        console.error("Supabase Error:", error);
-        return res.status(500).json({ error: "Shtrix-kod takrorlanmas bo'lishi kerak yoki xatolik yuz berdi!" });
+        console.error("❌ SUPABASE BAZA XATOLIGI:", error.message, error.details, error.hint);
+        
+        // Front-endda aniq nima xato bo'lganini bilishimiz uchun haqiqiy xatoni qaytaramiz:
+        return res.status(500).json({ 
+            error: `Baza xatoli: ${error.message}. Tafsilot: ${error.details || 'yoq'}` 
+        });
     }
     
     res.json(data ? data[0] : { success: true });
@@ -108,11 +116,11 @@ app.post('/api/sales', async (req, res) => {
                 .single();
 
             if (fetchErr || !prod) throw new Error(`Mahsulot topilmadi: ID ${item.id}`);
-            if (prod.stock < item.quantity) throw new Error(`Omborda ${prod.name} yetarli emas!`);
+            if (prod.stock < parseInt(item.quantity, 10)) throw new Error(`Omborda ${prod.name} yetarli emas!`);
 
             const { error: updErr } = await supabase
                 .from('products')
-                .update({ stock: prod.stock - item.quantity })
+                .update({ stock: prod.stock - parseInt(item.quantity, 10) })
                 .eq('id', item.id);
 
             if (updErr) throw new Error("Ombor qoldig'ini yangilashda xatolik yuz berdi.");
@@ -129,7 +137,7 @@ app.post('/api/sales', async (req, res) => {
 
             const { error: custUpdErr } = await supabase
                 .from('customers')
-                .update({ debt: (cust.debt || 0) + Number(totalSum) })
+                .update({ debt: (cust.debt || 0) + parseFloat(totalSum) })
                 .eq('id', customerId);
 
             if (custUpdErr) throw new Error("Mijoz qarzini yangilashda xatolik!");
@@ -138,7 +146,7 @@ app.post('/api/sales', async (req, res) => {
         const { error: historyErr } = await supabase
             .from('sales_history')
             .insert([{
-                total_sum: Number(totalSum),
+                total_sum: parseFloat(totalSum),
                 payment_method: paymentMethod,
                 customer_id: customerId ? Number(customerId) : null,
                 card_number: paymentMethod === 'karta' ? cardNumber : null
@@ -153,7 +161,7 @@ app.post('/api/sales', async (req, res) => {
     }
 });
 
-// ✨ YANGI QO'SHILGAN QISM: Savdolar tarixini front-endga yuborish (404 xatoni to'g'rilaydi)
+// Savdolar tarixini front-endga yuklab berish
 app.get('/api/sales', async (req, res) => {
     const { data, error } = await supabase
         .from('sales_history')
@@ -183,7 +191,7 @@ app.post('/api/customers', async (req, res) => {
     const { name, phone } = req.body;
     const { data, error } = await supabase
         .from('customers')
-        .insert([{ name, phone, debt: 0 }])
+        .insert([{ name: String(name).trim(), phone: phone || 'Kiritilmagan', debt: 0 }])
         .select();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -218,9 +226,10 @@ app.get('/api/analytics', async (req, res) => {
 
     if (data) {
         data.forEach(sale => {
-            if (sale.payment_method === 'naqd') naqd_tushum += sale.total_sum;
-            else if (sale.payment_method === 'karta') karta_tushum += sale.total_sum;
-            else if (sale.payment_method === 'nasiya') nasiya_savdo += sale.total_sum;
+            const sum = parseFloat(sale.total_sum) || 0;
+            if (sale.payment_method === 'naqd') naqd_tushum += sum;
+            else if (sale.payment_method === 'karta') karta_tushum += sum;
+            else if (sale.payment_method === 'nasiya') nasiya_savdo += sum;
         });
     }
 
