@@ -115,6 +115,79 @@ app.post('/api/products', async (req, res) => {
     }
 });
 
+// 🔄 OMBORDAGI TOVARNI YANGILASH (0 ta bo'lgan tovar qoldig'ini to'ldirish uchun)
+app.put('/api/products/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { barcode, name, category, stock, cost_price, price } = req.body;
+
+        const updatedProduct = {
+            name: String(name).trim(),
+            category: category ? String(category).trim() : 'Boshqa',
+            stock: Number(stock) || 0,
+            cost_price: Number(cost_price) || 0,
+            price: Number(price) || 0,
+            arrival_date: new Date().toISOString()
+        };
+
+        if (barcode && String(barcode).trim() !== "") {
+            updatedProduct.barcode = String(barcode).trim();
+        } else {
+            updatedProduct.barcode = null;
+        }
+
+        const { data, error } = await supabase
+            .from('products')
+            .update(updatedProduct)
+            .eq('id', id)
+            .select();
+
+        if (error) {
+            console.error("❌ YANGILASHDA XATOLIK:", error.message);
+            return res.status(500).json({ error: error.message });
+        }
+
+        res.json({ success: true, data: data ? data[0] : null });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 📊 EXCEL IMPORT - OMMAVIY TOVAR QO'SHISH API
+app.post('/api/products/import', async (req, res) => {
+    try {
+        const { products } = req.body;
+
+        if (!products || !Array.isArray(products) || products.length === 0) {
+            return res.status(400).json({ error: "Yuklash uchun tovarlar topilmadi!" });
+        }
+
+        const cleanProducts = products.map(p => ({
+            barcode: p.barcode ? String(p.barcode).trim() : null,
+            name: String(p.name || 'Nomsiz tovar').trim(),
+            category: p.category ? String(p.category).trim() : 'Boshqa',
+            stock: Number(p.stock) || 0,
+            cost_price: Number(p.cost_price) || 0,
+            price: Number(p.price) || 0,
+            arrival_date: new Date().toISOString()
+        }));
+
+        const { data, error } = await supabase
+            .from('products')
+            .insert(cleanProducts)
+            .select();
+
+        if (error) {
+            console.error("❌ EXCEL IMPORT XATOLIGI:", error.message);
+            return res.status(500).json({ error: error.message });
+        }
+
+        res.json({ success: true, message: `${cleanProducts.length} ta mahsulot muvaffaqiyatli import qilindi!`, data });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Ombordan mahsulotni o'chirish
 app.delete('/api/products/:id', async (req, res) => {
     try {
@@ -142,7 +215,7 @@ app.post('/api/sales', async (req, res) => {
     }
 
     try {
-        let totalProfit = 0; // Sotuvdagi jami sof foyda yig'indisi
+        let totalProfit = 0;
 
         // 1. Ombordan tovar miqdorini kamaytirish va foyda hisoblash
         for (const item of cartItems) {
@@ -159,11 +232,9 @@ app.post('/api/sales', async (req, res) => {
                 return res.status(400).json({ error: `Omborda ${prod.name} yetarli emas!` });
             }
 
-            // Har bir tovardan kelgan sof foyda: (Sotish - Tannarx) * Sotilgan soni
             const itemProfit = (Number(prod.price) - Number(prod.cost_price)) * Number(item.quantity);
             totalProfit += itemProfit;
 
-            // Ombordagi qoldiqni yangilash
             await supabase
                 .from('products')
                 .update({ stock: prod.stock - Number(item.quantity) })
@@ -187,12 +258,12 @@ app.post('/api/sales', async (req, res) => {
         // 3. Savdo tarixiga yozish (Foyda, Sana va To'lov holati bilan)
         await supabase.from('sales_history').insert([{
             total_sum: Number(totalSum),
-            profit_sum: totalProfit, // 💰 SOF FOYDA BAZAGA SAQLANDI
+            profit_sum: totalProfit,
             payment_method: paymentMethod,
             customer_id: customerId ? Number(customerId) : null,
             card_number: paymentMethod === 'karta' ? String(cardNumber) : null,
-            is_paid: paymentMethod !== 'nasiya', // Nasiya bo'lsa to'lanmagan (false) bo'ladi
-            sale_date: new Date().toISOString() // 📅 SOTILGAN SANA VA VAQTI
+            is_paid: paymentMethod !== 'nasiya',
+            sale_date: new Date().toISOString()
         }]);
 
         return res.json({ success: true, message: "To'lov muvaffaqiyatli qabul qilindi!" });
@@ -284,7 +355,7 @@ app.get('/api/analytics', async (req, res) => {
                 const sum = Number(sale.total_sum) || 0;
                 const profit = Number(sale.profit_sum) || 0;
 
-                jami_sof_foyda += profit; // Real sotuvlardan yig'ilgan aniq sof foyda
+                jami_sof_foyda += profit;
 
                 if (sale.payment_method === 'naqd') naqd_tushum += sum;
                 else if (sale.payment_method === 'karta') karta_tushum += sum;
@@ -292,11 +363,9 @@ app.get('/api/analytics', async (req, res) => {
             });
         }
 
-        // Ombordagi tugayotgan tovarlarni hisoblash
         const { data: products } = await supabase.from('products').select('stock');
         let tugayotgan_tovar_soni = products ? products.filter(p => Number(p.stock) <= 5).length : 0;
 
-        // Frontend o'zgaruvchilari nomlariga 100% moslab jo'natamiz
         res.json({ 
             sof_foyda: jami_sof_foyda, 
             naqd_tushum, 
